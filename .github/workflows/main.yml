@@ -1,0 +1,85 @@
+name: Build Android APK (Daftar App)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        # تم تغيير npm ci إلى npm install لتجاوز مشكلة عدم توافق ملف lock
+        run: npm install
+
+      - name: Build Web App
+        # بناء ملفات الويب (React/Vite) أولاً لإنشاء مجلد dist
+        run: npm run build
+
+      - name: Setup Capacitor and Android Platform
+        run: |
+          # تثبيت أدوات Capacitor اللازمة للتحويل
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets
+          
+          # إنشاء ملف إعدادات Capacitor إذا لم يكن موجوداً
+          if [ ! -f "capacitor.config.ts" ] && [ ! -f "capacitor.config.json" ]; then
+            echo "import { CapacitorConfig } from '@capacitor/cli';
+            const config: CapacitorConfig = {
+              appId: 'com.daftar.app',
+              appName: 'Daftar App',
+              webDir: 'dist',
+              server: {
+                androidScheme: 'https'
+              }
+            };
+            export default config;" > capacitor.config.ts
+          fi
+
+          # إضافة منصة أندرويد للمشروع
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+
+          # تجهيز الأيقونات وشاشات التوقف من ملفات المشروع الأصلية
+          mkdir -p assets
+          if [ -f "public/pwa-512x512.png" ]; then
+            cp public/pwa-512x512.png assets/icon-only.png
+            cp public/pwa-512x512.png assets/icon.png
+            cp public/pwa-512x512.png assets/splash.png
+            cp public/pwa-512x512.png assets/splash-dark.png
+            # توليد موارد الأندرويد تلقائياً
+            npx capacitor-assets generate --android
+          fi
+
+          # مزامنة ملفات الويب مع مشروع الأندرويد
+          npx cap sync android
+
+      - name: Setup Java for Android
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Build Android APK
+        run: |
+          # الدخول لمجلد الأندرويد وتشغيل عملية البناء
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload Final APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Daftar-App-Debug-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
